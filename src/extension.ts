@@ -170,24 +170,29 @@ async function updateLanguageServer(clientHandler: ClientHandler, installPath: s
 		updateLanguageServer(clientHandler, installPath);
 	}, 24 * hour);
 
-	// skip install if a language server binary path is set
-	if (!config('terraform').get('languageServer.pathToBinary')) {
-		const installer = new LanguageServerInstaller(installPath, reporter);
-		const install = await installer.needsInstall();
-		if (install) {
-			await clientHandler.stopClients();
-			try {
-				await installer.install();
-			} catch (err) {
-				console.log(err); // for test failure reporting
-				reporter.sendTelemetryException(err);
-				throw err;
-			} finally {
-				await installer.cleanupZips();
+	try {
+		// skip install if a language server binary path is set
+		if (!config('terraform').get('languageServer.pathToBinary')) {
+			const installer = new LanguageServerInstaller(installPath, reporter);
+			const install = await installer.needsInstall();
+			if (install) {
+				await clientHandler.stopClients();
+				try {
+					await installer.install();
+				} catch (err) {
+					console.log(err); // for test failure reporting
+					reporter.sendTelemetryException(err);
+					throw err;
+				} finally {
+					await installer.cleanupZips();
+				}
 			}
 		}
+		// on repeat runs with no install, this will be a no-op
+		return clientHandler.startClients(prunedFolderNames());
+	} catch (error) {
+		vscode.window.showErrorMessage(error.message);
 	}
-	return clientHandler.startClients(prunedFolderNames()); // on repeat runs with no install, this will be a no-op
 }
 
 function execWorkspaceCommand(client: LanguageClient, params: ExecuteCommandParams): Promise<any> {
