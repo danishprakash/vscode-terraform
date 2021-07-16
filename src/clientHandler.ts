@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import ShortUniqueId from 'short-unique-id';
+import * as fs from 'fs';
+import * as which from 'which';
 import {
 	Executable,
 	LanguageClient,
@@ -34,18 +36,10 @@ const clients: Map<string, TerraformLanguageClient> = new Map();
  */
 export class ClientHandler {
 	private shortUid: ShortUniqueId;
-	private pathToBinary: string;
 	private supportsMultiFolders = true;
 
 	constructor(private context: vscode.ExtensionContext, private reporter: TelemetryReporter ) {
 		this.shortUid = new ShortUniqueId();
-		this.pathToBinary = config('terraform').get('languageServer.pathToBinary');
-		if (this.pathToBinary) {
-			this.reporter.sendTelemetryEvent('usePathToBinary');
-		} else {
-			const installPath = path.join(context.extensionPath, 'lsp');
-			this.pathToBinary = path.join(installPath, 'terraform-ls');
-		}
 	}
 
 	public startClients(folders?: string[]): vscode.Disposable[] {
@@ -100,7 +94,7 @@ export class ClientHandler {
 	}
 
 	private createTerraformClient(location?: string): TerraformLanguageClient {
-		const cmd = this.pathToBinary;
+		const cmd = this.validatedPathToBinary();
 		const binaryName = cmd.split('/').pop();
 
 		const serverArgs: string[] = config('terraform').get('languageServer.args');
@@ -232,6 +226,36 @@ export class ClientHandler {
 				console.log(`Client deleted for ${folder}`);
 			}
 		});
+	}
+
+	private validatedPathToBinary(): string {
+		const optionName = 'languageServer.pathToBinary'
+		let pathToBinary: string = config('terraform').get(optionName);
+		if (pathToBinary) {
+			this.reporter.sendTelemetryEvent('usePathToBinary');
+		} else {
+			const installPath = path.join(this.context.extensionPath, 'lsp');
+			pathToBinary = path.join(installPath, 'terraform-ls');
+		}
+
+		let cmd: string
+		try {
+			if (path.isAbsolute(pathToBinary)) {
+				fs.accessSync(pathToBinary, fs.constants.X_OK);
+				cmd = pathToBinary;
+			} else {
+				cmd = which.sync(pathToBinary);
+			}
+			console.log(`Found server at ${cmd}`);
+		} catch (err) {
+			let extraHint: string;
+			if (pathToBinary) {
+				extraHint = `. Check "${optionName}" in your settings.`
+			}
+			throw new Error(`Unable to launch language server: ${err.message}${extraHint}`);
+		}
+
+		return cmd;
 	}
 
 	public getClient(document?: vscode.Uri): TerraformLanguageClient {
